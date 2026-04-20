@@ -1,0 +1,63 @@
+# Google Cloud Build configuration
+# Builds the Docker image and pushes it to Artifact Registry.
+#
+# Prerequisites (run once from your local machine):
+#   gcloud artifacts repositories create bp-tracker \
+#     --repository-format=docker \
+#     --location=europe-west2 \
+#     --description="BP Tracker images"
+#
+# Deploy to Cloud Run after a successful push:
+#   gcloud run deploy bp-tracker \
+#     --image europe-west2-docker.pkg.dev/$PROJECT_ID/bp-tracker/app:latest \
+#     --platform managed \
+#     --region europe-west2 \
+#     --allow-unauthenticated \
+#     --set-env-vars PORT=8080 \
+#     --set-secrets DATABASE_URL=bp-tracker-db-url:latest,JWT_SECRET=bp-tracker-jwt-secret:latest
+
+substitutions:
+  _REGION: europe-west2
+  _REPO: bp-tracker
+  _SERVICE: bp-tracker
+
+steps:
+  # Build the image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - build
+      - -t
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app:$COMMIT_SHA"
+      - -t
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app:latest"
+      - .
+    timeout: "600s"
+
+  # Push both tags
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - push
+      - --all-tags
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - "${_SERVICE}"
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app:$COMMIT_SHA
+      - --platform=managed
+      - --region=${_REGION}
+      - --allow-unauthenticated
+      - --port=8080
+      - --set-env-vars=PORT=8080,NODE_ENV=production
+      - --set-secrets=DATABASE_URL=bp-tracker-db-url:latest,JWT_SECRET=bp-tracker-jwt-secret:latest
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app:$COMMIT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/app:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
